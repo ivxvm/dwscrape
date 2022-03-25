@@ -7,6 +7,7 @@ import pThrottle from 'p-throttle';
 
 const BASE_URL = 'https://www.doomworld.com/forum/4-wads-mods';
 const DB_FILE_PATH = './db.json';
+const ATTACHMENTS_DIR_PATH = './attachments';
 
 const SELECTORS = {
     pagination: '.ipsPagination_pageJump',
@@ -23,10 +24,32 @@ if (!fs.existsSync(DB_FILE_PATH)) {
     fs.writeFileSync(DB_FILE_PATH, '{}');
 }
 
+if (!fs.existsSync(ATTACHMENTS_DIR_PATH)) {
+    console.log('Attachments directory not found, creating empty directory');
+    fs.mkdirSync(ATTACHMENTS_DIR_PATH);
+}
+
 const throttle = pThrottle({
     limit: 1,
     interval: 1000,
 });
+
+const downloadFile = (url, path) =>
+    new Promise((resolve, reject) => {
+        throttle((url) => axios.get(url, { responseType: 'stream' }))(url)
+            .then((response) => {
+                if (response.status !== 200) {
+                    return reject(new Error(response.statusText));
+                }
+                const writeStream = fs.createWriteStream(path);
+                response.data.pipe(writeStream);
+                writeStream.on('finish', () => {
+                    writeStream.close();
+                    resolve();
+                });
+            })
+            .catch(reject);
+    });
 
 (async () => {
     console.log('Reading database');
@@ -34,16 +57,16 @@ const throttle = pThrottle({
     let lastPage = 1;
     for (let page = 1; page <= lastPage; page++) {
         console.log(`Processing page ${page} of forum`);
-        const response = await throttle(axios.get)(`${BASE_URL}/?page=${page}`);
-        const dom = new JSDOM(response.data);
-        const document = dom.window.document;
-        const paginator = document.querySelector(SELECTORS.pagination);
-        const pagesCount = paginator ? +paginator.textContent.trim().split(' ').at(-1) : 1;
-        if (typeof pagesCount !== 'number') {
-            throw new Error(`pagesCount is not a number: ${pagesCount}`);
+        const forumResponse = await throttle(axios.get)(`${BASE_URL}/?page=${page}`);
+        const forumDom = new JSDOM(forumResponse.data);
+        const forumDocument = forumDom.window.document;
+        const forumPaginator = forumDocument.querySelector(SELECTORS.pagination);
+        const forumPagesCount = forumPaginator ? +forumPaginator.textContent.trim().split(' ').at(-1) : 1;
+        if (typeof forumPagesCount !== 'number') {
+            throw new Error(`pagesCount is not a number: ${forumPagesCount}`);
         }
-        lastPage = Math.max(lastPage, pagesCount);
-        for (const link of document.querySelectorAll(SELECTORS.forumThreadLink)) {
+        lastPage = Math.max(lastPage, forumPagesCount);
+        for (const link of forumDocument.querySelectorAll(SELECTORS.forumThreadLink)) {
             console.log(`Processing thread ${link.href} - ${link.textContent.trim()}`);
             const threadId = link.href.match(/topic\/(\d+)-/)[1];
             assert.ok(threadId);
@@ -95,9 +118,14 @@ const throttle = pThrottle({
                             .replace(/\r?\n/g, ' ')}..."`
                     );
                     for (const attachment of postNode.querySelectorAll(SELECTORS.threadPost_attachment)) {
-                        const url = attachment.href;
+                        let url = attachment.href;
+                        if (url.startsWith('//')) {
+                            url = 'https:' + url;
+                        }
                         const title = attachment.textContent.trim();
-                        console.log(`+ Attachment: ${url} - ${title}`);
+                        const dlPath = `${ATTACHMENTS_DIR_PATH}/${threadId}_${postId}_${title}`;
+                        console.log(`Downloading attachment ${url} to ${dlPath}`);
+                        await downloadFile(url, dlPath);
                         post.attachments.push({ url, title });
                     }
                     thread.posts[postId] = post;
@@ -106,7 +134,7 @@ const throttle = pThrottle({
                 db[threadId] = thread;
             }
             fs.writeFileSync(DB_FILE_PATH, JSON.stringify(db));
-            process.exit();
         }
+        process.exit();
     }
 })();
