@@ -144,7 +144,6 @@ setInterval(saveDb, 20_000);
                         }
                     }
                     const postText = postNode.querySelector(SELECTORS.threadPost_text).textContent.trim();
-                    assert.ok(postText);
                     const post = {
                         author: postAuthor,
                         text: postText,
@@ -203,4 +202,5 @@ setInterval(saveDb, 20_000);
         }
     }
     saveDb();
+    process.exit();
 })();
