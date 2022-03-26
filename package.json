@@ -11,6 +11,7 @@
   "license": "ISC",
   "dependencies": {
     "axios": "^0.26.1",
+    "checksum": "^1.0.0",
     "jsdom": "^19.0.0",
     "p-throttle": "^5.0.0",
     "ramda": "^0.28.0"
